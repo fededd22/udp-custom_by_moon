@@ -27,8 +27,7 @@ git clone https://github.com/http-custom/udp-custom && cd udp-custom && chmod +x
  * Edit path config /root/udp/config.json, after changing it then reboot
  * Optional port exclude separated by coma, ex. 53,5300
 
-## telegram
- > [magnu](https://t.me/magnui)
+
 
 #
   > _made from pieces with ❤️_
