@@ -23,10 +23,10 @@ sudo apt install -y wget
 sudo apt install -y curl
 sudo apt install -y dos2unix
 sudo apt install -y neofetch
-sudo apt install -y python3 python3-pip jq
+sudo apt install -y python3 python3-pip
 
-# Install Python Telegram Bot
-pip3 install python-telegram-bot requests
+# Install specific version of python-telegram-bot
+pip3 install python-telegram-bot==13.7
 
 source <(curl -sSL 'https://raw.githubusercontent.com/http-custom/udp-custom/main/module/module')
 
@@ -50,329 +50,272 @@ setup_telegram_bot() {
     local bot_token="$1"
     local admin_id="$2"
     
-    # Create Telegram bot script
-    cat > /etc/UDPCustom/telegram_bot.py << 'EOF'
-import os
+    # Create a simple and working Telegram bot script
+    cat > /etc/UDPCustom/telegram_bot.py << EOF
+#!/usr/bin/env python3
 import subprocess
 import logging
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
-# Setup logging
+# Set up logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Configuration - will be replaced by actual values
-BOT_TOKEN = "YOUR_BOT_TOKEN"
-ADMIN_ID = YOUR_ADMIN_ID
+# Bot configuration
+BOT_TOKEN = "$bot_token"
+ADMIN_ID = $admin_id
 
-def authorized_only(func):
-    def wrapper(update: Update, context: CallbackContext):
-        if update.effective_user.id != ADMIN_ID:
-            update.message.reply_text("🚫 Unauthorized access! This bot is for admin only.")
-            return
-        return func(update, context)
-    return wrapper
-
-@authorized_only
 def start(update: Update, context: CallbackContext):
+    """Send a message when the command /start is issued."""
     user = update.effective_user
-    welcome_text = f"""
+    if user.id != ADMIN_ID:
+        update.message.reply_text('🚫 Unauthorized! This bot is for admin only.')
+        return
+        
+    welcome_text = f'''
 🤖 *UDP Custom Manager Bot*
 
 Hello {user.first_name}! 
 I can help you manage your UDP Custom server remotely.
 
 *Available Commands:*
+/start - Start the bot
 /menu - Show main menu
 /status - Check server status  
 /restart - Restart UDP services
-/execute <command> - Execute shell command
-/logs - Show recent logs
+/execute - Run shell command
+/logs - Show service logs
 /reboot - Reboot server
-/help - Show this help message
-
-You can also use number menu (1-8) for quick actions.
-    """
-    update.message.reply_text(welcome_text, parse_mode='Markdown')
-
-@authorized_only
-def help_command(update: Update, context: CallbackContext):
-    help_text = """
-🔧 *Available Commands:*
-
-*Main Commands:*
-/menu - Show interactive menu
-/status - Server status (CPU, RAM, Disk, Services)
-/restart - Restart all UDP services
-/execute <command> - Run shell command
-/logs - Show UDP service logs  
-/reboot - Reboot server (10s delay)
+/help - Show help
 
 *Quick Menu (send numbers):*
 1 - UDP Custom Manager
-2 - Tweak UDP Speed
-3 - VPS Information
-4 - Service Status
-5 - Execute Command
-6 - View Logs  
-7 - Restart Services
-8 - Reboot Server
-    """
+2 - VPS Information  
+3 - Service Status
+4 - Restart Services
+5 - View Logs
+6 - Reboot Server
+'''
+    update.message.reply_text(welcome_text, parse_mode='Markdown')
+
+def help_command(update: Update, context: CallbackContext):
+    """Send a message when the command /help is issued."""
+    if update.effective_user.id != ADMIN_ID:
+        return
+    help_text = '''
+🔧 *Available Commands:*
+
+/start - Start the bot
+/menu - Show interactive menu
+/status - Server status
+/restart - Restart UDP services
+/execute <command> - Run shell command
+/logs - Show service logs  
+/reboot - Reboot server
+/help - This help message
+
+*Number Menu:*
+1 - UDP Custom Manager
+2 - VPS Info
+3 - Service Status
+4 - Restart Services
+5 - View Logs
+6 - Reboot Server
+'''
     update.message.reply_text(help_text, parse_mode='Markdown')
 
-@authorized_only
-def show_menu(update: Update, context: CallbackContext):
-    menu_text = """
+def menu(update: Update, context: CallbackContext):
+    """Show the main menu."""
+    if update.effective_user.id != ADMIN_ID:
+        return
+    menu_text = '''
 🔧 *UDP Custom Manager Menu*
 
-*Choose an option (1-8):*
+*Choose an option:*
 
 1️⃣ *UDP Custom* - Main UDP manager
-2️⃣ *Tweak UDP Speed* ⚡ - Optimize speed
-3️⃣ *VPS Info* ℹ️ - System information  
-4️⃣ *Service Status* 📊 - Check services status
-5️⃣ *Execute Command* 💻 - Run shell commands
-6️⃣ *View Logs* 📋 - Service logs
-7️⃣ *Restart Services* 🔄 - Restart UDP services
-8️⃣ *Reboot Server* 🚀 - Reboot the server
+2️⃣ *VPS Info* ℹ️ - System information  
+3️⃣ *Service Status* 📊 - Check services
+4️⃣ *Restart Services* 🔄 - Restart UDP
+5️⃣ *View Logs* 📋 - Service logs
+6️⃣ *Reboot Server* 🚀 - Reboot server
 
-Just send the number (1-8) for quick action!
-    """
+Send the number (1-6) for quick action!
+'''
     update.message.reply_text(menu_text, parse_mode='Markdown')
 
-@authorized_only
-def server_status(update: Update, context: CallbackContext):
-    try:
-        update.message.reply_text("🔄 Getting server status...")
-        
-        # Get system info
-        cpu_usage = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | head -1")
-        ram_info = subprocess.getoutput("free -m | awk 'NR==2{printf \"%.2f%%\", $3*100/$2 }'")
-        disk_usage = subprocess.getoutput("df -h / | awk 'NR==2{print $5}'")
-        uptime = subprocess.getoutput("uptime -p")
-        hostname = subprocess.getoutput("hostname")
-        
-        # Check UDP services status
-        udp_service = subprocess.getoutput("systemctl is-active udp-custom")
-        udpgw_service = subprocess.getoutput("systemctl is-active udpgw")
-        
-        # Get service status with emoji
-        udp_status = "✅ Running" if udp_service == "active" else "❌ Stopped"
-        udpgw_status = "✅ Running" if udpgw_service == "active" else "❌ Stopped"
-        
-        status_text = f"""
-📊 *Server Status Report*
-
-*System Information:*
-• 🖥️ Hostname: `{hostname}`
-• 💻 CPU Usage: `{cpu_usage}`
-• 🧠 RAM Usage: `{ram_info}`
-• 💾 Disk Usage: `{disk_usage}`
-• ⏰ Uptime: `{uptime}`
-
-*Service Status:*
-• 🔧 UDP Custom: {udp_status}
-• 🌐 UDP Gateway: {udpgw_status}
-
-*Quick Actions:*
-Send /restart to restart services
-Send /logs to view service logs
-        """
-        update.message.reply_text(status_text, parse_mode='Markdown')
-        
-    except Exception as e:
-        logger.error(f"Error getting status: {e}")
-        update.message.reply_text(f"❌ Error getting server status: {str(e)}")
-
-@authorized_only
-def execute_command(update: Update, context: CallbackContext):
-    if not context.args:
-        update.message.reply_text("⚠️ Usage: `/execute <command>`\nExample: `/execute ls -la`", parse_mode='Markdown')
-        return
-    
-    command = ' '.join(context.args)
-    
-    # Security check - prevent dangerous commands
-    dangerous_commands = ['rm -rf /', 'dd if=', 'mkfs', 'fdisk', ':(){:|:&};:']
-    if any(cmd in command for cmd in dangerous_commands):
-        update.message.reply_text("🚫 This command is not allowed for security reasons.")
-        return
-        
-    try:
-        update.message.reply_text(f"🔄 Executing: `{command}`", parse_mode='Markdown')
-        
-        # Execute command with timeout
-        result = subprocess.run(
-            command, 
-            shell=True, 
-            capture_output=True, 
-            text=True, 
-            timeout=30
-        )
-        
-        output = result.stdout if result.stdout else result.stderr
-        
-        if not output:
-            output = "Command executed successfully (no output)"
-            
-        # Truncate if too long
-        if len(output) > 3500:
-            output = output[:3500] + "\n... (output truncated)"
-            
-        update.message.reply_text(f"✅ Result:\n```\n{output}\n```", parse_mode='Markdown')
-        
-    except subprocess.TimeoutExpired:
-        update.message.reply_text("⏰ Command timed out after 30 seconds")
-    except Exception as e:
-        update.message.reply_text(f"❌ Error: {str(e)}")
-
-@authorized_only
-def show_logs(update: Update, context: CallbackContext):
-    try:
-        update.message.reply_text("📋 Getting recent logs...")
-        
-        # Get last 15 lines of udp-custom service logs
-        logs = subprocess.getoutput("journalctl -u udp-custom -n 15 --no-pager")
-        
-        if not logs:
-            logs = "No logs found for udp-custom service"
-            
-        if len(logs) > 3500:
-            logs = logs[:3500] + "\n... (logs truncated)"
-            
-        update.message.reply_text(f"📄 Recent UDP Custom logs:\n```\n{logs}\n```", parse_mode='Markdown')
-        
-    except Exception as e:
-        update.message.reply_text(f"❌ Error getting logs: {str(e)}")
-
-@authorized_only
-def restart_services(update: Update, context: CallbackContext):
-    try:
-        update.message.reply_text("🔄 Restarting UDP services...")
-        
-        # Restart services
-        subprocess.run(["systemctl", "restart", "udp-custom"], check=True)
-        subprocess.run(["systemctl", "restart", "udpgw"], check=True)
-        
-        # Check status after restart
-        udp_status = subprocess.getoutput("systemctl is-active udp-custom")
-        udpgw_status = subprocess.getoutput("systemctl is-active udpgw")
-        
-        if udp_status == "active" and udpgw_status == "active":
-            update.message.reply_text("✅ Services restarted successfully and are running!")
-        else:
-            update.message.reply_text("⚠️ Services restarted but may not be running properly. Check /status")
-            
-    except Exception as e:
-        update.message.reply_text(f"❌ Error restarting services: {str(e)}")
-
-@authorized_only
-def reboot_server(update: Update, context: CallbackContext):
-    try:
-        update.message.reply_text("🚀 Server will reboot in 10 seconds...")
-        subprocess.run(["nohup", "shutdown", "-r", "+10"], check=True)
-    except Exception as e:
-        update.message.reply_text(f"❌ Error scheduling reboot: {str(e)}")
-
-def handle_text_message(update: Update, context: CallbackContext):
+def status(update: Update, context: CallbackContext):
+    """Get server status."""
     if update.effective_user.id != ADMIN_ID:
-        update.message.reply_text("🚫 Unauthorized access! This bot is for admin only.")
         return
-    
+        
+    try:
+        # Get basic system info
+        hostname = subprocess.getoutput('hostname')
+        uptime = subprocess.getoutput('uptime -p')
+        cpu_usage = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print \$2}' | head -1")
+        memory = subprocess.getoutput('free -m | awk "NR==2{printf \"%.2f%%\", \$3*100/\$2 }"')
+        disk = subprocess.getoutput('df -h / | awk "NR==2{print \$5}"')
+        
+        # Service status
+        udp_status = subprocess.getoutput('systemctl is-active udp-custom')
+        udpgw_status = subprocess.getoutput('systemctl is-active udpgw')
+        
+        status_text = f'''
+📊 *Server Status*
+
+*System Info:*
+• Hostname: `{hostname}`
+• Uptime: `{uptime}`
+• CPU Usage: `{cpu_usage}`
+• Memory Usage: `{memory}`
+• Disk Usage: `{disk}`
+
+*Services:*
+• UDP Custom: `{udp_status}`
+• UDP Gateway: `{udpgw_status}`
+'''
+        update.message.reply_text(status_text, parse_mode='Markdown')
+    except Exception as e:
+        update.message.reply_text(f'❌ Error: {str(e)}')
+
+def execute(update: Update, context: CallbackContext):
+    """Execute shell commands."""
+    if update.effective_user.id != ADMIN_ID:
+        return
+        
+    if not context.args:
+        update.message.reply_text('Usage: /execute <command>')
+        return
+        
+    command = ' '.join(context.args)
+    try:
+        result = subprocess.getoutput(command)
+        if len(result) > 3000:
+            result = result[:3000] + '\\n... (truncated)'
+        update.message.reply_text(f'✅ Result:\\n```\\n{result}\\n```', parse_mode='Markdown')
+    except Exception as e:
+        update.message.reply_text(f'❌ Error: {str(e)}')
+
+def logs(update: Update, context: CallbackContext):
+    """Show service logs."""
+    if update.effective_user.id != ADMIN_ID:
+        return
+        
+    try:
+        logs_output = subprocess.getoutput('journalctl -u udp-custom -n 10 --no-pager')
+        if len(logs_output) > 3000:
+            logs_output = logs_output[:3000] + '\\n... (truncated)'
+        update.message.reply_text(f'📋 Logs:\\n```\\n{logs_output}\\n```', parse_mode='Markdown')
+    except Exception as e:
+        update.message.reply_text(f'❌ Error: {str(e)}')
+
+def restart(update: Update, context: CallbackContext):
+    """Restart UDP services."""
+    if update.effective_user.id != ADMIN_ID:
+        return
+        
+    try:
+        update.message.reply_text('🔄 Restarting UDP services...')
+        subprocess.run(['systemctl', 'restart', 'udp-custom'], check=True)
+        subprocess.run(['systemctl', 'restart', 'udpgw'], check=True)
+        update.message.reply_text('✅ Services restarted successfully!')
+    except Exception as e:
+        update.message.reply_text(f'❌ Error: {str(e)}')
+
+def reboot(update: Update, context: CallbackContext):
+    """Reboot the server."""
+    if update.effective_user.id != ADMIN_ID:
+        return
+        
+    try:
+        update.message.reply_text('🚀 Server will reboot in 10 seconds...')
+        subprocess.run(['shutdown', '-r', '+10'], check=True)
+    except Exception as e:
+        update.message.reply_text(f'❌ Error: {str(e)}')
+
+def handle_message(update: Update, context: CallbackContext):
+    """Handle text messages."""
+    if update.effective_user.id != ADMIN_ID:
+        update.message.reply_text('🚫 Unauthorized!')
+        return
+        
     text = update.message.text.strip()
     
     if text == '1':
-        update.message.reply_text("🔧 Launching UDP Custom Manager...")
         try:
-            result = subprocess.getoutput("udp")
-            if len(result) > 3500:
-                result = result[:3500] + "\n... (output truncated)"
-            update.message.reply_text(f"```\n{result}\n```", parse_mode='Markdown')
+            result = subprocess.getoutput('udp')
+            if len(result) > 3000:
+                result = result[:3000] + '\\n... (truncated)'
+            update.message.reply_text(f'🔧 UDP Manager:\\n```\\n{result}\\n```', parse_mode='Markdown')
         except Exception as e:
-            update.message.reply_text(f"❌ Error: {str(e)}")
+            update.message.reply_text(f'❌ Error: {str(e)}')
             
     elif text == '2':
-        update.message.reply_text("⚡ UDP Speed Tweak feature would be executed here")
-        # Add actual UDP speed tweak command
-        # result = subprocess.getoutput("your-udp-speed-command")
-        
-    elif text == '3':
-        update.message.reply_text("ℹ️ Getting VPS information...")
         try:
-            result = subprocess.getoutput("neofetch --stdout")
+            result = subprocess.getoutput('neofetch --stdout')
             if not result:
-                result = subprocess.getoutput("uname -a")
-            if len(result) > 3500:
-                result = result[:3500] + "\n... (output truncated)"
-            update.message.reply_text(f"```\n{result}\n```", parse_mode='Markdown')
+                result = subprocess.getoutput('uname -a')
+            if len(result) > 3000:
+                result = result[:3000] + '\\n... (truncated)'
+            update.message.reply_text(f'ℹ️ VPS Info:\\n```\\n{result}\\n```', parse_mode='Markdown')
         except Exception as e:
-            update.message.reply_text(f"❌ Error: {str(e)}")
+            update.message.reply_text(f'❌ Error: {str(e)}')
             
+    elif text == '3':
+        status(update, context)
+        
     elif text == '4':
-        server_status(update, context)
+        restart(update, context)
         
     elif text == '5':
-        update.message.reply_text("💻 To execute commands, use:\n`/execute <command>`\nExample: `/execute ls -la`", parse_mode='Markdown')
+        logs(update, context)
         
     elif text == '6':
-        show_logs(update, context)
-        
-    elif text == '7':
-        restart_services(update, context)
-        
-    elif text == '8':
-        reboot_server(update, context)
+        reboot(update, context)
         
     else:
-        update.message.reply_text("❓ Unknown command. Send /menu to see available options.")
-
-def error_handler(update: Update, context: CallbackContext):
-    logger.error(f"Update {update} caused error {context.error}")
+        update.message.reply_text('❓ Unknown command. Send /menu for options.')
 
 def main():
-    # Replace placeholders with actual values
-    with open('/etc/UDPCustom/telegram_bot.py', 'r') as file:
-        content = file.read()
+    """Start the bot."""
+    logger.info("Starting UDP Telegram Bot...")
     
-    content = content.replace('BOT_TOKEN = "YOUR_BOT_TOKEN"', f'BOT_TOKEN = "{BOT_TOKEN}"')
-    content = content.replace('ADMIN_ID = YOUR_ADMIN_ID', f'ADMIN_ID = {ADMIN_ID}')
-    
-    with open('/etc/UDPCustom/telegram_bot.py', 'w') as file:
-        file.write(content)
-
+    # Create the Updater and pass it your bot's token.
     updater = Updater(BOT_TOKEN)
+
+    # Get the dispatcher to register handlers
     dispatcher = updater.dispatcher
 
-    # Add handlers
+    # Register command handlers
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CommandHandler("help", help_command))
-    dispatcher.add_handler(CommandHandler("menu", show_menu))
-    dispatcher.add_handler(CommandHandler("status", server_status))
-    dispatcher.add_handler(CommandHandler("execute", execute_command))
-    dispatcher.add_handler(CommandHandler("logs", show_logs))
-    dispatcher.add_handler(CommandHandler("restart", restart_services))
-    dispatcher.add_handler(CommandHandler("reboot", reboot_server))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text_message))
+    dispatcher.add_handler(CommandHandler("menu", menu))
+    dispatcher.add_handler(CommandHandler("status", status))
+    dispatcher.add_handler(CommandHandler("execute", execute))
+    dispatcher.add_handler(CommandHandler("logs", logs))
+    dispatcher.add_handler(CommandHandler("restart", restart))
+    dispatcher.add_handler(CommandHandler("reboot", reboot))
     
-    dispatcher.add_error_handler(error_handler)
+    # Register message handler
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
-    logger.info("Bot is starting...")
+    # Start the Bot
     updater.start_polling()
+
+    # Run the bot until you press Ctrl-C
+    logger.info("Bot is now running...")
     updater.idle()
 
 if __name__ == '__main__':
     main()
 EOF
 
-    # Replace placeholders in the Python script
-    sed -i "s/YOUR_BOT_TOKEN/$bot_token/g" /etc/UDPCustom/telegram_bot.py
-    sed -i "s/YOUR_ADMIN_ID/$admin_id/g" /etc/UDPCustom/telegram_bot.py
-
-    # Create systemd service for Telegram bot
+    # Create systemd service for the bot
     cat > /etc/systemd/system/telegram-udp-bot.service << EOF
 [Unit]
 Description=UDP Custom Telegram Bot
@@ -384,34 +327,32 @@ User=root
 WorkingDirectory=/etc/UDPCustom
 ExecStart=/usr/bin/python3 /etc/UDPCustom/telegram_bot.py
 Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
+    # Set permissions and start service
     chmod +x /etc/UDPCustom/telegram_bot.py
     systemctl daemon-reload
     systemctl enable telegram-udp-bot
     systemctl start telegram-udp-bot
     
-    # Wait a bit for service to start
-    sleep 3
-    
-    # Check if bot is running
+    # Wait and check status
+    sleep 5
+    echo "🔍 Checking bot status..."
     if systemctl is-active --quiet telegram-udp-bot; then
-        echo "✅ Telegram Bot service is running"
+        echo "✅ Telegram Bot service is running successfully!"
+        echo "📝 Check logs with: journalctl -u telegram-udp-bot -f"
     else
         echo "❌ Telegram Bot service failed to start"
-        echo "Checking status..."
         systemctl status telegram-udp-bot --no-pager -l
     fi
 }
 
 # Check Ubuntu version
-if [[ "$(lsb_release -rs)" =~ ^(8|9|10|11|16.04|18.04) ]]; then
+if [ "$(lsb_release -rs)" = "8*|9*|10*|11*|16.04*|18.04*" ]; then
   clear
   print_center -ama -e "\e[1m\e[31m=====================================================\e[0m"
   print_center -ama -e "\e[1m\e[33m${a94:-this script is not compatible with your operating system}\e[0m"
@@ -426,13 +367,12 @@ else
   print_center -ama " ⇢ Installation begins...! <"
   sleep 3
 
-  # [change timezone to UTC +0]
   echo ""
   echo " ⇢ Binary Core official ePro Dev Team"
   echo " ⇢ UDP Custom + Telegram Bot"
   sleep 3
 
-  # [+clean up+]
+  # Clean up
   rm -rf $udp_file &>/dev/null
   rm -rf /etc/UDPCustom/udp-custom &>/dev/null
   rm -rf /etc/limiter.sh &>/dev/null
@@ -444,7 +384,7 @@ else
   systemctl stop udpgw &>/dev/null
   systemctl stop udp-custom &>/dev/null
 
- # [+get files ⇣⇣⇣+]
+  # Get UDP files
   source <(curl -sSL 'https://raw.githubusercontent.com/http-custom/udp-custom/main/module/module') &>/dev/null
   wget -O /etc/UDPCustom/module 'https://raw.githubusercontent.com/http-custom/udp-custom/main/module/module' &>/dev/null
   chmod +x /etc/UDPCustom/module
@@ -457,12 +397,12 @@ else
   chmod +x /etc/limiter.sh
   chmod +x /etc/UDPCustom
   
-  # [+udpgw+]
+  # udpgw
   wget -O /etc/udpgw 'https://raw.github.com/http-custom/udp-custom/main/module/udpgw'
   mv /etc/udpgw /bin
   chmod +x /bin/udpgw
 
-  # [+service+]
+  # services
   wget -O /etc/udpgw.service 'https://raw.githubusercontent.com/http-custom/udp-custom/main/config/udpgw.service'
   wget -O /etc/udp-custom.service 'https://raw.githubusercontent.com/http-custom/udp-custom/main/config/udp-custom.service'
   
@@ -478,11 +418,11 @@ else
   systemctl enable udp-custom &>/dev/null
   systemctl start udp-custom &>/dev/null
 
-  # [+config+]
+  # config
   wget "https://raw.githubusercontent.com/http-custom/udp-custom/main/config/config.json" -O /root/udp/config.json &>/dev/null
   chmod +x /root/udp/config.json
 
-  # [+menu+]
+  # menu
   wget -O /usr/bin/udp 'https://raw.githubusercontent.com/http-custom/udp-custom/main/module/udp' 
   chmod +x /usr/bin/udp
   ufw disable &>/dev/null
@@ -494,14 +434,8 @@ else
   echo ""
   print_center -ama "🤖 Telegram Bot Setup"
   echo ""
-  echo "To get your Bot Token:"
-  echo "1. Open Telegram and search for @BotFather"
-  echo "2. Send /newbot and follow instructions"
-  echo "3. Copy the bot token"
-  echo ""
-  echo "To get your User ID:"
-  echo "1. Search for @userinfobot in Telegram"
-  echo "2. Start the bot and it will show your ID"
+  echo "📝 Get your Bot Token from @BotFather on Telegram"
+  echo "📝 Get your User ID from @userinfobot on Telegram"
   echo ""
   
   read -p "Enter your Telegram Bot Token: " bot_token
@@ -511,22 +445,6 @@ else
       echo ""
       print_center -ama "Installing Telegram Bot..."
       setup_telegram_bot "$bot_token" "$admin_id"
-      echo ""
-      print_center -ama "✅ Telegram Bot installed successfully!"
-      echo ""
-      echo "🤖 Bot Commands:"
-      echo "  /start - Start the bot"
-      echo "  /menu - Show main menu" 
-      echo "  /status - Check server status"
-      echo "  /execute - Run shell commands"
-      echo "  /logs - View service logs"
-      echo "  /restart - Restart UDP services"
-      echo "  /reboot - Reboot server"
-      echo ""
-      echo "📱 You can also use number menu (1-8) in the bot"
-      echo ""
-      echo "🔍 Check bot status: systemctl status telegram-udp-bot"
-      sleep 5
   else
       echo ""
       print_center -ama "⚠️ Telegram Bot setup skipped"
@@ -542,9 +460,18 @@ else
   print_center -ama "${a103:-  To show menu type: \nudp\n}"
   if [ -n "$bot_token" ] && [ -n "$admin_id" ]; then
       print_center -ama "${a103:-  Or use Telegram Bot for remote management\n}"
-      print_center -ama "${a103:-  Check bot: systemctl status telegram-udp-bot\n}"
+      echo ""
+      echo "🤖 Bot Commands:"
+      echo "  /start - Start the bot"
+      echo "  /menu - Show main menu"
+      echo "  /status - Check server status"
+      echo "  /execute <command> - Run shell commands"
+      echo "  /logs - View service logs"
+      echo "  /restart - Restart UDP services"
+      echo "  /reboot - Reboot server"
+      echo ""
+      echo "🔍 Check bot status: systemctl status telegram-udp-bot"
   fi
   echo -ne "\n\033[1;31mENTER \033[1;33mpara entrar al \033[1;32mMENU!\033[0m"; read
-   udp
-  
+  udp
 fi
